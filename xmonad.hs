@@ -110,7 +110,7 @@ customStartupHook :: X ()
 customStartupHook = ewmhDesktopsStartup <+> sequence_ 
   [ spawnOnce "picom"
   , spawnOnce "$HOME/.cabal/bin/taffybar-x86_64"
-  , spawnOnce "$HOME/fehbg"
+  , spawnOnce "$HOME/.fehbg"
   , spawnOnce "libinput-gestures"
   , spawnOnce "clipmenud"
   , spawnOnce "nextcloud"

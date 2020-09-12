@@ -1,7 +1,7 @@
 cabal-version:       2.4
 name:                arch-xmonad
 version:             0.1.0.0
-license:             GPL
+license:             GPL-3.0-or-later
 license-file:        LICENSE
 author:              francois
 
