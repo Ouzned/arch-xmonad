@@ -8,7 +8,7 @@ Stability   :  unstable
 Portability :  portable
 -}
 
---import System.Taffybar.Support.PagerHints (pagerHints)
+import Data.Monoid
 import XMonad
 import XMonad.Actions.CycleWS
 import XMonad.Actions.DynamicProjects
@@ -17,8 +17,9 @@ import XMonad.Core
 import XMonad.Hooks.EwmhDesktops
 import XMonad.Hooks.ManageDocks
 import XMonad.Hooks.ManageHelpers
-import XMonad.Layout.Fullscreen
+import XMonad.Layout.Fullscreen 
 import XMonad.Layout.Grid
+import XMonad.Layout.LayoutModifier
 import XMonad.Layout.MultiToggle
 import XMonad.Layout.MultiToggle.Instances
 import XMonad.Layout.NoBorders
@@ -32,7 +33,11 @@ import XMonad.Util.NoTaskbar
 import XMonad.Util.Stack
 import XMonad.Util.SpawnOnce
   
-main = xmonad . fullscreenSupport . docks . dynamicProjects projects $ customConfig
+main = xmonad
+  . docks
+  . fullscreenSupport
+  . dynamicProjects projects
+  $ customConfig
 
 -- |Name of the compiled xmonad binary
 xmonadBin :: String
@@ -67,7 +72,7 @@ customKeysP :: [(String, X ())]
 customKeysP = 
   [ -- Applications
     ("M-a s", spawn "flameshot gui")
-  , ("M-a f", spawn "firefox")
+  , ("M-a b", spawn "chromium")
   , ("M-a t", spawn customTerminal)
   , ("M-a e", spawn "emacs")
   , ("M-a c", spawn "CM_LAUNCHER=rofi clipmenu")
@@ -122,12 +127,14 @@ customStartupHook = ewmhDesktopsStartup <+> sequence_
 -- |List of custom event hooks
 -- ewmhDesktopsEventHook handles external events related to the
 -- ewmh protocol
+customEventHook :: Event -> X All
 customEventHook = ewmhDesktopsEventHook
 
 -- |Move the pointer to the center of the newly focused window.
 -- Filter the NSP workspace from the list exposed through ewmh
 customLogHook :: X ()
-customLogHook = updatePointer (0.5, 0.5) (0.5, 0.5) <+> ewmhDesktopsLogHookCustom namedScratchpadFilterOutWorkspace
+customLogHook = updatePointer (0.5, 0.5) (0.5, 0.5)
+  <+> ewmhDesktopsLogHookCustom namedScratchpadFilterOutWorkspace
 
 -- |Handle specific window placement. ManageHooks are applied right to left
 -- 1: Apply scratchpad hooks
@@ -145,31 +152,18 @@ customManageHook = composeAll
         , (title =? "win0" <||> title =? "win2") <&&> className =? "jetbrains-phpstorm" 
         ]
 
--- List of available layouts
-customLayout = spaced . avoidStruts . mkToggle (single FULL) $
-               tiled
-               ||| Mirror tiled 
-               ||| Grid
-               ||| simpleTabbedAlways
+-- |List of available window layouts with modifiers
+customLayout = smartBorders
+  . avoidStruts
+  . spaced
+  . mkToggle (single FULL)
+  $ tiled
+  ||| Grid
+  ||| tabbed shrinkText tabConfig
   where
     tiled = Tall 1 (3/100) (1/2)
-    spaced  = spacingRaw True (Border 0 0 0 0) True (Border 10 10 10 10) True
+    spaced = spacingRaw True (Border 0 0 0 0) True (Border 10 10 10 10) True
     
--- Style for the various prompts (ssh, dynamic projects...)
-projectXPConfig :: XPConfig
-projectXPConfig = def { font = "xft:Sans"
-                      , position = CenteredAt 0.5 0.5
-                      , height = 50
-                      , bgColor           = "#262e3d"
-                      , fgColor           = "#eeeeee"
-                      , fgHLight          = "#ffffff"
-                      , bgHLight          = "#c50ed2"
-                      , borderColor       = "#0D1729"
-                      , promptBorderWidth = 4
-                      , maxComplRows = Just 3
-                      , historySize = 0
-                      }
-
 -- |Definition of dynamic projects
 projects :: [Project]
 projects = 
@@ -192,16 +186,42 @@ projects =
   ]
   
 -- Definition of named scratchpads
+scratchpads :: [NamedScratchpad]
 scratchpads = [ NS "keepassxc" "keepassxc" (className =? "KeePassXC") floatAndHide
               , NS "term" "alacritty --class scratchterm" (resource =? "scratchterm") floatAndHide
-              , NS "whatsapp" whatsAppLauncher (className =? "whatsapp") floatAndHide
               ]
-  where whatsAppLauncher = "firefox -P whatsapp --class=whatsapp --kiosk https://web.whatsapp.com"
-        floatAndHide = doCenterFloat <+> noTaskbar
+  where floatAndHide = doCenterFloat <+> noTaskbar
 
--- ----------------
+
+-- --------------------------------------------
+-- Misc themes
+-- --------------------------------------------
+
+-- |Configuration for the tabbed layout
+tabConfig :: Theme
+tabConfig = def { fontName = "xft:Sans"
+                , decoHeight = 10
+                }
+
+-- |Configuration for the dynamic project prompt
+projectXPConfig :: XPConfig
+projectXPConfig = def { font = "xft:Sans"
+                      , position = CenteredAt 0.5 0.5
+                      , height = 50
+                      , bgColor           = "#262e3d"
+                      , fgColor           = "#eeeeee"
+                      , fgHLight          = "#ffffff"
+                      , bgHLight          = "#c50ed2"
+                      , borderColor       = "#0D1729"
+                      , promptBorderWidth = 4
+                      , maxComplRows = Just 3
+                      , historySize = 0
+                      }
+
+
+-- -------------------------------------------
 -- Helper functions
--- ----------------
+-- -------------------------------------------
 
 -- |Checks if a window is of type 'splash'
 isSplash :: Query Bool
