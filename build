@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -e
+
+EXE_NAME=xmonad-x86_64-linux
+
+################################################################################
+# This script will be given a single argument, the path to the
+# executable it should produce.
+output_file=$1; shift
+
+cabal build
+
+find dist-newstyle -type f -executable -name $EXE_NAME \
+     -exec mv -u '{}' $output_file ';'
+
+ln -sf $output_file "$HOME/.cabal/bin"
