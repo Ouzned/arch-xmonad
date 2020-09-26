@@ -10,9 +10,11 @@ Portability :  portable
 
 import Data.Monoid
 import XMonad
+import XMonad.Actions.CopyWindow
 import XMonad.Actions.CycleWS
-import XMonad.Actions.DynamicProjects
+import XMonad.Actions.FindEmptyWorkspace
 import XMonad.Actions.UpdatePointer
+import XMonad.Config.Azerty
 import XMonad.Core
 import XMonad.Hooks.EwmhDesktops
 import XMonad.Hooks.ManageDocks
@@ -27,16 +29,15 @@ import XMonad.Layout.Spacing
 import XMonad.Layout.Tabbed
 import XMonad.Prompt
 import qualified XMonad.StackSet as W
-import XMonad.Util.EZConfig (additionalKeysP)
+import XMonad.Util.EZConfig (additionalKeysP, additionalKeys)
 import XMonad.Util.NamedScratchpad
 import XMonad.Util.NoTaskbar
-import XMonad.Util.Stack
 import XMonad.Util.SpawnOnce
-  
+import XMonad.Util.Stack
+
 main = xmonad
   . docks
   . fullscreenSupport
-  . dynamicProjects projects
   $ customConfig
 
 -- |Name of the compiled xmonad binary
@@ -47,15 +48,12 @@ xmonadBin = "xmonad-x86_64-linux"
 customTerminal :: String
 customTerminal = "alacritty"
 
-customWorkspaces :: [String]
-customWorkspaces = ["web", "emacs", "mail"]
-
 -- |Name of the scratchpad workspace
 scratchpadWs :: String
 scratchpadWs = "NSP"
   
 -- |XMonad main configuration structure
-customConfig = def 
+customConfig = def
   { terminal = customTerminal
   , borderWidth = 4
   , modMask = mod5Mask
@@ -64,27 +62,29 @@ customConfig = def
   , handleEventHook = customEventHook
   , logHook = customLogHook
   , startupHook = customStartupHook
-  , workspaces = customWorkspaces
-  } `additionalKeysP` customKeysP
+  , focusedBorderColor = "#2a9d8f"
+  , normalBorderColor = "#264653"
+  }
+  `additionalKeysP` customKeysP
+  `additionalKeys` (customWsKeys def)
 
 -- |Custom key bindings & overrides
 customKeysP :: [(String, X ())]
 customKeysP = 
   [ -- Applications
     ("M-a s", spawn "flameshot gui")
-  , ("M-a b", spawn "chromium")
+  , ("M-a f", spawn "firefox")
   , ("M-a t", spawn customTerminal)
-  , ("M-a e", spawn "emacs")
+  , ("M-a e", spawn "emacsclient -c -n -e '(switch-to-buffer nil)'")
   , ("M-a c", spawn "CM_LAUNCHER=rofi clipmenu")
 
-    -- Go to projects
-  , ("M-S-g", shiftToProjectPrompt projectXPConfig)
-  , ("M-g", switchProjectPrompt projectXPConfig)
+    -- Empty workspaces functions
+  , ("M-S-m", tagToEmptyWorkspace)
+  , ("M-m", viewEmptyWorkspace)
 
     -- Scratchpads
   , ("M-s k", namedScratchpadAction scratchpads "keepassxc")
   , ("M-s t", namedScratchpadAction scratchpads "term")
-  , ("M-s w", namedScratchpadAction scratchpads "whatsapp")
 
     -- Special keys
   , ("<XF86MonBrightnessUp>", spawn "light -A 2")
@@ -93,28 +93,40 @@ customKeysP =
   , ("<XF86AudioLowerVolume>", spawn "pactl set-sink-volume @DEFAULT_SINK@ -10%")
   , ("<XF86AudioMute>", spawn "pactl set-sink-mute @DEFAULT_SINK@ toggle")
 
-    -- Azerty remapping
-  , ("M-;", sendMessage (IncMasterN (-1)))
-  , ("M-z", screenWorkspace 0 >>= flip whenJust (windows . W.view))
-  , ("m-S-z", screenWorkspace 0 >>= flip whenJust (windows . W.shift))
-
     -- Misc
   , ("M-q", whenX (recompile False) (restart xmonadBin True))
   , ("M-o", spawn "xset s activate")
   , ("M-f", sendMessage $ Toggle FULL) 
   , ("M-d", spawn "rofi -show drun")
-  , ("M-w", spawn "rofi -show window")
+  , ("M-g", spawn "rofi -show window")
   , ("M-c c", kill)
   , ("M-t", toggleWS' [scratchpadWs])
   ]
-  
+
+-- |Use the super key for workspace navigation because altgr + top row
+-- is already used for special characters
+customWsKeys :: XConfig l -> [((KeyMask, KeySym), X ())]
+customWsKeys conf = 
+    [((mod4Mask, xK_semicolon), sendMessage (IncMasterN (-1)))]
+    ++
+    [((m .|. mod4Mask, k), windows $ f i)
+        | (i, k) <- zip (workspaces conf) topRow,
+          (f, m) <- [(W.greedyView, 0), (W.shift, shiftMask)]]
+    ++
+    -- mod-{z,e,r} %! Switch to physical/Xinerama screens 1, 2, or 3
+    -- mod-shift-{z,e,r} %! Move client to screen 1, 2, or 3
+    [((m .|. mod4Mask, key), screenWorkspace sc >>= flip whenJust (windows . f))
+        | (key, sc) <- zip [xK_z, xK_e, xK_r] [0..],
+          (f, m) <- [(W.view, 0), (W.shift, shiftMask)]]
+    where topRow = [0x26,0xe9,0x22,0x27,0x28,0x2d,0xe8,0x5f,0xe7,0xe0] 
+    
 -- |List of sequenced actions to execute when xmonad starts
 -- ewmhDesktopStartup notify ewmh compliant programs that the
 -- protocol is supported by xmonad
 customStartupHook :: X ()
 customStartupHook = ewmhDesktopsStartup <+> sequence_ 
   [ spawnOnce "picom"
-  , spawnOnce "$HOME/.cabal/bin/taffybar-x86_64"
+  , spawnOnce "taffybar-x86_64"
   , spawnOnce "$HOME/.fehbg"
   , spawnOnce "libinput-gestures"
   , spawnOnce "clipmenud"
@@ -138,11 +150,12 @@ customLogHook = updatePointer (0.5, 0.5) (0.5, 0.5)
 
 -- |Handle specific window placement. ManageHooks are applied right to left
 -- 1: Apply scratchpad hooks
--- 2: Float dialog, splash and misbehaving windows
--- 3: Place foating window at the center of the screen
+-- 2: Handle Firefox PictureInPicture window
+-- 3: Float splash / dialogs at the center of the screen
 customManageHook :: ManageHook
 customManageHook = composeAll 
     [ floats --> doCenterFloat
+    , isPictureInPicture --> doSideFloat SE <+> doCopyToAll
     , namedScratchpadManageHook scratchpads
     ]
   where 
@@ -151,7 +164,10 @@ customManageHook = composeAll
         , isSplash
         , (title =? "win0" <||> title =? "win2") <&&> className =? "jetbrains-phpstorm" 
         ]
-
+    doCopyToAll = do
+      w <- ask
+      doF (\ws -> foldr (copyWindow w) ws $ currentWorkspaces ws)
+      
 -- |List of available window layouts with modifiers
 customLayout = smartBorders
   . avoidStruts
@@ -163,34 +179,13 @@ customLayout = smartBorders
   where
     tiled = Tall 1 (3/100) (1/2)
     spaced = spacingRaw True (Border 0 0 0 0) True (Border 10 10 10 10) True
-    
--- |Definition of dynamic projects
-projects :: [Project]
-projects = 
-  [ Project { projectName = "web"
-            , projectDirectory = "~/"
-            , projectStartHook = Just $ spawn "firefox"
-            }
-  , Project { projectName = "mail"
-            , projectDirectory = "~/"
-            , projectStartHook = Just $ spawn "thunderbird"
-            }
-  , Project { projectName = "emacs"
-            , projectDirectory = "~/"
-            , projectStartHook = Just $ spawn "emacs"
-            }
-  , Project { projectName = "php"
-            , projectDirectory = "~/"
-            , projectStartHook = Just $ spawn "phpstorm"
-            }
-  ]
   
 -- Definition of named scratchpads
 scratchpads :: [NamedScratchpad]
 scratchpads = [ NS "keepassxc" "keepassxc" (className =? "KeePassXC") floatAndHide
               , NS "term" "alacritty --class scratchterm" (resource =? "scratchterm") floatAndHide
               ]
-  where floatAndHide = doCenterFloat <+> noTaskbar
+  where floatAndHide = doRectFloat (W.RationalRect (1/8) (1/8) (3/4) (3/4)) <+> noTaskbar
 
 
 -- --------------------------------------------
@@ -200,24 +195,8 @@ scratchpads = [ NS "keepassxc" "keepassxc" (className =? "KeePassXC") floatAndHi
 -- |Configuration for the tabbed layout
 tabConfig :: Theme
 tabConfig = def { fontName = "xft:Sans"
-                , decoHeight = 10
+                , decoHeight = 35
                 }
-
--- |Configuration for the dynamic project prompt
-projectXPConfig :: XPConfig
-projectXPConfig = def { font = "xft:Sans"
-                      , position = CenteredAt 0.5 0.5
-                      , height = 50
-                      , bgColor           = "#262e3d"
-                      , fgColor           = "#eeeeee"
-                      , fgHLight          = "#ffffff"
-                      , bgHLight          = "#c50ed2"
-                      , borderColor       = "#0D1729"
-                      , promptBorderWidth = 4
-                      , maxComplRows = Just 3
-                      , historySize = 0
-                      }
-
 
 -- -------------------------------------------
 -- Helper functions
@@ -226,3 +205,10 @@ projectXPConfig = def { font = "xft:Sans"
 -- |Checks if a window is of type 'splash'
 isSplash :: Query Bool
 isSplash = isInProperty "_NET_WM_WINDOW_TYPE" "_NET_WM_WINDOW_TYPE_SPLASH"
+
+isPictureInPicture :: Query Bool
+isPictureInPicture = title =? "Picture-in-Picture"
+
+currentWorkspaces :: W.StackSet i l a s sd -> [i]
+currentWorkspaces = map W.tag . W.workspaces
+
