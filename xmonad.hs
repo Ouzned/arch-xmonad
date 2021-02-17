@@ -1,43 +1,38 @@
-{- |
-Module      :  xmonad.hs
-Description :  Custom xmonad configuration for my arch linux laptop
-Copyright   :  @Ouzned
-License     :  GPL
-
-Stability   :  unstable
-Portability :  portable
--}
-
-import Data.Monoid
-import XMonad
-import XMonad.Actions.CopyWindow
-import XMonad.Actions.CycleWS
-import XMonad.Actions.FindEmptyWorkspace
-import XMonad.Actions.UpdatePointer
-import XMonad.Config.Azerty
-import XMonad.Core
-import XMonad.Hooks.EwmhDesktops
-import XMonad.Hooks.ManageDocks
-import XMonad.Hooks.ManageHelpers
-import XMonad.Layout.Fullscreen 
-import XMonad.Layout.Grid
-import XMonad.Layout.LayoutModifier
-import XMonad.Layout.MultiToggle
-import XMonad.Layout.MultiToggle.Instances
-import XMonad.Layout.NoBorders
-import XMonad.Layout.Spacing
-import XMonad.Layout.Tabbed
-import XMonad.Prompt
+import           Control.Monad (void)
+import           Data.Char (isSpace)
+import           Data.List (sort)
+import           Data.Maybe (listToMaybe)
+import           Data.Monoid
+import           XMonad
+import           XMonad.Actions.CopyWindow
+import           XMonad.Actions.CycleWS
+import           XMonad.Actions.DynamicProjects
+import           XMonad.Actions.DynamicWorkspaces (renameWorkspaceByName)
+import           XMonad.Actions.UpdatePointer
+import           XMonad.Hooks.EwmhDesktops
+import           XMonad.Hooks.ManageDocks
+import           XMonad.Hooks.ManageHelpers
+import           XMonad.Hooks.WorkspaceHistory
+import           XMonad.Layout.Fullscreen
+import           XMonad.Layout.Grid
+import           XMonad.Layout.MultiToggle
+import           XMonad.Layout.MultiToggle.Instances
+import           XMonad.Layout.NoBorders
+import           XMonad.Layout.Spacing
+import           XMonad.Layout.Tabbed
+import           XMonad.Prompt.Input ((?+))
 import qualified XMonad.StackSet as W
-import XMonad.Util.EZConfig (additionalKeysP, additionalKeys)
-import XMonad.Util.NamedScratchpad
-import XMonad.Util.NoTaskbar
-import XMonad.Util.SpawnOnce
-import XMonad.Util.Stack
+import           XMonad.Util.EZConfig (additionalKeysP, additionalKeys)
+import           XMonad.Util.NamedScratchpad
+import           XMonad.Util.NoTaskbar
+import           XMonad.Util.Run
+import           XMonad.Util.SpawnOnce
+import XMonad.StackSet (greedyView)
 
 main = xmonad
   . docks
   . fullscreenSupport
+  . dynamicProjects []
   $ customConfig
 
 -- |Name of the compiled xmonad binary
@@ -51,6 +46,9 @@ customTerminal = "alacritty"
 -- |Name of the scratchpad workspace
 scratchpadWs :: String
 scratchpadWs = "NSP"
+
+scratchWorkspace :: Project
+scratchWorkspace = Project "scratch" "~/" Nothing
   
 -- |XMonad main configuration structure
 customConfig = def
@@ -64,9 +62,10 @@ customConfig = def
   , startupHook = customStartupHook
   , focusedBorderColor = "#2a9d8f"
   , normalBorderColor = "#264653"
+  , workspaces = [ "main", "aux" ]
   }
   `additionalKeysP` customKeysP
-  `additionalKeys` (customWsKeys def)
+  `additionalKeys` customWsKeys def
 
 -- |Custom key bindings & overrides
 customKeysP :: [(String, X ())]
@@ -79,13 +78,26 @@ customKeysP =
   , ("M-a c", spawn "CM_LAUNCHER=rofi clipmenu")
 
     -- Empty workspaces functions
-  , ("M-S-m", tagToEmptyWorkspace)
-  , ("M-m", viewEmptyWorkspace)
+  , ("M-S-m", shiftToProject scratchWorkspace)
+  , ("M-m", switchProject scratchWorkspace)
 
     -- Scratchpads
   , ("M-s k", namedScratchpadAction scratchpads "keepassxc")
   , ("M-s t", namedScratchpadAction scratchpads "term")
+  , ("M-s s", namedScratchpadAction scratchpads "signal")
 
+    -- Workspaces
+  , ("M-w", createOrSwitchWks)
+  , ("M-S-w", shiftToWks)
+  , ("M-r", renameWks)
+
+    -- Workspaces navigation
+  , ("M-t", toggleWS' [scratchpadWs])
+  , ("M-b", historyBackward)
+  
+    -- Window copy to projects
+  , ("M-y", windows copyToAll)
+    
     -- Special keys
   , ("<XF86MonBrightnessUp>", spawn "light -A 2")
   , ("<XF86MonBrightnessDown>", spawn "light -U 2")
@@ -99,8 +111,7 @@ customKeysP =
   , ("M-f", sendMessage $ Toggle FULL) 
   , ("M-d", spawn "rofi -show drun")
   , ("M-g", spawn "rofi -show window")
-  , ("M-c c", kill)
-  , ("M-t", toggleWS' [scratchpadWs])
+  , ("M-c c", kill1)
   ]
 
 -- |Use the super key for workspace navigation because altgr + top row
@@ -124,7 +135,7 @@ customWsKeys conf =
 -- ewmhDesktopStartup notify ewmh compliant programs that the
 -- protocol is supported by xmonad
 customStartupHook :: X ()
-customStartupHook = ewmhDesktopsStartup <+> sequence_ 
+customStartupHook = ewmhDesktopsStartup <+> sequence_
   [ spawnOnce "picom"
   , spawnOnce "taffybar-x86_64"
   , spawnOnce "$HOME/.fehbg"
@@ -134,6 +145,7 @@ customStartupHook = ewmhDesktopsStartup <+> sequence_
   , spawnOnce "nm-applet --sm-disable --indicator"
   , spawnOnce "blueman-tray"
   , spawnOnce "xss-lock -n /usr/lib/xsecurelock/dimmer -l -- xsecurelock"
+--  , liftIO $ void $ acpiListen acpiHandler
   ]
 
 -- |List of custom event hooks
@@ -143,10 +155,12 @@ customEventHook :: Event -> X All
 customEventHook = ewmhDesktopsEventHook
 
 -- |Move the pointer to the center of the newly focused window.
--- Filter the NSP workspace from the list exposed through ewmh
+-- Filter the NSP workspace from the list exposed through ewmh.
+-- Add navigation history.
 customLogHook :: X ()
 customLogHook = updatePointer (0.5, 0.5) (0.5, 0.5)
   <+> ewmhDesktopsLogHookCustom namedScratchpadFilterOutWorkspace
+  <+> workspaceHistoryHook
 
 -- |Handle specific window placement. ManageHooks are applied right to left
 -- 1: Apply scratchpad hooks
@@ -184,6 +198,7 @@ customLayout = smartBorders
 scratchpads :: [NamedScratchpad]
 scratchpads = [ NS "keepassxc" "keepassxc" (className =? "KeePassXC") floatAndHide
               , NS "term" "alacritty --class scratchterm" (resource =? "scratchterm") floatAndHide
+              , NS "signal" "signal-desktop --use-tray-icon" (className =? "Signal") floatAndHide
               ]
   where floatAndHide = doRectFloat (W.RationalRect (1/8) (1/8) (3/4) (3/4)) <+> noTaskbar
 
@@ -198,17 +213,59 @@ tabConfig = def { fontName = "xft:Sans"
                 , decoHeight = 35
                 }
 
+historyBackward = do
+  wks <- workspaceHistory
+  whenJust (lastWorkspace wks) doView
+  where lastWorkspace = listToMaybe . reverse
+        doView w = windows $ greedyView w
+
+historyForward = do
+  wks <- workspaceHistory
+  whenJust (firstWorkspace wks) doView
+  where firstWorkspace = listToMaybe
+        doView w = windows $ greedyView w
+
+-------------------------------------------
+-- Workspace action prompts
+-------------------------------------------
+
+createOrSwitchWks :: X ()
+createOrSwitchWks = workspacesPrompt "create or switch"
+  ?+ (\name -> switchProject (Project name "~/" Nothing)) 
+
+shiftToWks :: X ()
+shiftToWks = workspacesPrompt "shift window"
+  ?+ (\name -> shiftToProject (Project name "~/" Nothing))
+
+renameWks :: X ()
+renameWks = workspacesPrompt "rename" ?+ renameWorkspaceByName 
+  
 -- -------------------------------------------
 -- Helper functions
 -- -------------------------------------------
+
+-- |Displays a graphical prompt that returns the user choice as a String
+runPrompt :: MonadIO m => String -> [String] -> m String
+runPrompt prompt choices = runProcessWithInput "rofi" ["-dmenu", "-p", prompt] $ unlines choices
+
+-- |Displays a prompt listing the available workspaces
+workspacesPrompt :: String -> X (Maybe String)
+workspacesPrompt prompt = do
+  wks <- gets (sort . map W.tag . filterScratch . W.workspaces . windowset) 
+  value <- runPrompt prompt wks
+  if all isSpace value then
+    return Nothing
+  else
+    return (listToMaybe . lines $ value)
+  where
+    filterScratch = namedScratchpadFilterOutWorkspace
 
 -- |Checks if a window is of type 'splash'
 isSplash :: Query Bool
 isSplash = isInProperty "_NET_WM_WINDOW_TYPE" "_NET_WM_WINDOW_TYPE_SPLASH"
 
 isPictureInPicture :: Query Bool
-isPictureInPicture = title =? "Picture-in-Picture"
+isPictureInPicture = appName =? "Toolkit" <&&> className =? "firefox"
 
 currentWorkspaces :: W.StackSet i l a s sd -> [i]
 currentWorkspaces = map W.tag . W.workspaces
-

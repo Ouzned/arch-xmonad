@@ -1,0 +1,5 @@
+executable-stripping: True
+optimization: True
+packages:
+  ./arch-xmonad.cabal
+  ./xmonad-contrib/xmonad-contrib.cabal
