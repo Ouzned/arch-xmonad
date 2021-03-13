@@ -1,3 +1,7 @@
 cradle:
   cabal:
- 
+    - path: "./xmonad.hs"
+      component: "arch-xmonad:exe:xmonad-x86_64-linux"
+
+    - path: "./xmonad-contrib/"
+      component: "lib:xmonad-contrib"
