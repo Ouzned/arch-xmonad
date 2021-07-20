@@ -2,7 +2,7 @@ import Data.Char (isSpace)
 import Data.List (sort)
 import Data.Maybe (listToMaybe)
 import Data.Monoid
-import System.Taffybar.Support.PagerHints
+--import System.Taffybar.Support.PagerHints
 import XMonad
 import XMonad.Actions.CopyWindow
 import XMonad.Actions.CycleWS
@@ -37,7 +37,7 @@ main =
   xmonad
     . docks
     . fullscreenSupport
-    . pagerHints
+--    . pagerHints
     . dynamicProjects []
     $ customConfig
 
@@ -90,8 +90,8 @@ customKeysP =
     ("M-s t", namedScratchpadAction scratchpads "term"),
     ("M-s s", namedScratchpadAction scratchpads "signal"),
     -- Workspaces
-    ("M-w", createOrSwitchWks),
-    ("M-S-w", shiftToWks),
+    ("M-p", createOrSwitchWks),
+    ("M-S-p", shiftToWks),
     ("M-r", renameWks),
     -- Workspaces navigation
     ("M-t", toggleWS' [scratchpadWs]),
@@ -104,7 +104,7 @@ customKeysP =
     ("<XF86AudioMute>", spawn "pactl set-sink-mute @DEFAULT_SINK@ toggle"),
     -- Misc
     ("M-q", whenX (recompile False) (restart xmonadBin True)),
-    ("M-k", withFocused $ windows . W.sink),
+    ("M-i", withFocused $ windows . W.sink),
     ("M-o", spawn "xset s activate"),
     ("M-f", sendMessage $ Toggle FULL),
     ("M-d", spawn "rofi -show drun"),
@@ -138,7 +138,7 @@ customStartupHook :: X ()
 customStartupHook =
   ewmhDesktopsStartup
     <+> sequence_
-      [ spawnOnce "picom",
+      [ spawnOnce "picom --experimental-backends",
         spawnOnce "taffybar-x86_64",
         spawnOnce "$HOME/.fehbg",
         spawnOnce "libinput-gestures",
@@ -146,6 +146,7 @@ customStartupHook =
         spawnOnce "nextcloud",
         spawnOnce "nm-applet --sm-disable --indicator",
         spawnOnce "blueman-tray",
+        spawnOnce "pasystray",
         spawnOnce "xss-lock -n /usr/lib/xsecurelock/dimmer -l -- xsecurelock"
       ]
 
